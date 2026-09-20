@@ -1,0 +1,8 @@
+node_modules/
+data/
+runs/
+.env
+logs/
+/report.html
+results.g1.jsonl
+.DS_Store
