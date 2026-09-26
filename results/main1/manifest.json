@@ -1,0 +1,83 @@
+{
+  "run_id": "main1",
+  "generated_at": "2026-09-27T03:47:43.314Z",
+  "command": "npm run experiment -- --N 100,10000,200000 --k 3,10 --mode direct,query_agent,rerank --tasks t001,t002,t003,t004,t005,t006,t007,t008,t009,t010,t011,t012,t013,t014,t015,t031,t032,t033,t034,t035 --repeats 1 --model claude-haiku-4-5 --reranker minilm --seed 1 --run-id main1",
+  "trials": 199,
+  "errors": 0,
+  "first_trial_at": "2026-09-26T17:08:57.044Z",
+  "last_trial_at": "2026-09-26T18:36:50.292Z",
+  "backend": [
+    "claude-code"
+  ],
+  "models": [
+    "claude-haiku-4-5"
+  ],
+  "qa_models": [
+    "claude-haiku-4-5"
+  ],
+  "modes": [
+    "direct",
+    "query_agent",
+    "rerank"
+  ],
+  "N": [
+    100,
+    10000,
+    200000
+  ],
+  "k": [
+    3,
+    10
+  ],
+  "tasks": [
+    "t001",
+    "t002",
+    "t003",
+    "t004",
+    "t005",
+    "t006",
+    "t007",
+    "t008",
+    "t009",
+    "t010",
+    "t011",
+    "t012",
+    "t013",
+    "t014",
+    "t015",
+    "t031",
+    "t032",
+    "t033",
+    "t034",
+    "t035"
+  ],
+  "repeats": 1,
+  "seed": [
+    1
+  ],
+  "gen_version": [
+    "g2"
+  ],
+  "gen_command": "npm run gen -- --count 200000 --tasks 30 --multi 10 --seed 42 --task-seed 7 --quiet",
+  "data": {
+    "tools_file": "data/tools.jsonl",
+    "tools_sha256": "2e87c399e48b5a09b121469b7b599c96fe7c963ea807926b210515adc1a333bb",
+    "tasks_file": "data/tasks.jsonl",
+    "tasks_sha256": "94a1b067a0272bea4f8c9e5f45c8b629409d14ad6a637c645b580309346191b6"
+  },
+  "knobs": {
+    "worker_turns_per_part": 8,
+    "worker_searches_per_part": 3,
+    "query_agent_turns": 6,
+    "query_agent_searches": 4,
+    "embedding_model": "Xenova/bge-small-en-v1.5",
+    "timeout_ms_per_part": 240000,
+    "rerank_candidates": 50
+  },
+  "env": {
+    "node": "v25.9.0",
+    "claude code": "2.1.283",
+    "os": "Darwin 25.6.0 arm64",
+    "qdrant": "http://localhost:6333"
+  }
+}

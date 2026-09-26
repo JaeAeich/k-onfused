@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 380" width="680" height="380" role="img" aria-label="Recall@k: target delivered to the agent · direct · claude-haiku-4-5">
+<style>
+svg{font:12px system-ui,-apple-system,"Segoe UI",sans-serif}
+.bg{fill:#fcfcfb} .ink{fill:#0b0b0b} .ink2{fill:#52514e} .muted{fill:#898781}
+.grid{stroke:#e1e0d9;stroke-width:1} .axis{stroke:#c3c2b7;stroke-width:1}
+.n{fill:#d8d7d0;stroke:#d8d7d0} .s0{fill:#2a78d6;stroke:#2a78d6} .t0{stroke:#2a78d6} .s1{fill:#eb6834;stroke:#eb6834} .t1{stroke:#eb6834} .s2{fill:#1baf7a;stroke:#1baf7a} .t2{stroke:#1baf7a} .s3{fill:#eda100;stroke:#eda100} .t3{stroke:#eda100} .s4{fill:#e87ba4;stroke:#e87ba4} .t4{stroke:#e87ba4} .s5{fill:#008300;stroke:#008300} .t5{stroke:#008300} .s6{fill:#4a3aa7;stroke:#4a3aa7} .t6{stroke:#4a3aa7} .s7{fill:#e34948;stroke:#e34948} .t7{stroke:#e34948} .ring{stroke:#fcfcfb}
+@media (prefers-color-scheme: dark){
+.bg{fill:#1a1a19} .ink{fill:#fff} .ink2{fill:#c3c2b7} .grid{stroke:#2c2c2a} .axis{stroke:#383835}
+.n{fill:#3a3a37;stroke:#3a3a37} .s0{fill:#3987e5;stroke:#3987e5} .t0{stroke:#3987e5} .s1{fill:#d95926;stroke:#d95926} .t1{stroke:#d95926} .s2{fill:#199e70;stroke:#199e70} .t2{stroke:#199e70} .s3{fill:#c98500;stroke:#c98500} .t3{stroke:#c98500} .s4{fill:#d55181;stroke:#d55181} .t4{stroke:#d55181} .s5{fill:#008300;stroke:#008300} .t5{stroke:#008300} .s6{fill:#9085e9;stroke:#9085e9} .t6{stroke:#9085e9} .s7{fill:#e66767;stroke:#e66767} .t7{stroke:#e66767} .ring{stroke:#1a1a19}}
+</style>
+<rect class="bg" width="680" height="380" rx="10"/>
+<text class="ink" x="16" y="26" font-size="14" font-weight="600">Recall@k: target delivered to the agent · direct · claude-haiku-4-5</text>
+<text class="muted" x="16" y="44">did any search hand the agent every target tool? · whiskers = 95% CI</text>
+<rect class="s0" x="16" y="59" width="10" height="10" rx="2"/><text class="ink2" x="32" y="68">k=3</text><rect class="s1" x="70.6" y="59" width="10" height="10" rx="2"/><text class="ink2" x="86.6" y="68">k=10</text>
+<line class="axis" x1="52" x2="570" y1="328" y2="328"/>
+<text class="muted" x="44" y="332" text-anchor="end">0%</text>
+<line class="grid" x1="52" x2="570" y1="269.5" y2="269.5"/>
+<text class="muted" x="44" y="273.5" text-anchor="end">25%</text>
+<line class="grid" x1="52" x2="570" y1="211" y2="211"/>
+<text class="muted" x="44" y="215" text-anchor="end">50%</text>
+<line class="grid" x1="52" x2="570" y1="152.5" y2="152.5"/>
+<text class="muted" x="44" y="156.5" text-anchor="end">75%</text>
+<line class="grid" x1="52" x2="570" y1="94" y2="94"/>
+<text class="muted" x="44" y="98" text-anchor="end">100%</text>
+<text class="muted" x="77.9" y="346" text-anchor="middle">100</text>
+<text class="muted" x="311" y="346" text-anchor="middle">10k</text>
+<text class="muted" x="544.0999999999999" y="346" text-anchor="middle">200k</text>
+<text class="ink2" x="311" y="368" text-anchor="middle">catalog size N</text>
+<line class="t0" stroke-width="1.5" opacity=".7" x1="73.9" x2="73.9" y1="131.7044493658144" y2="94"/>
+<line class="t0" stroke-width="1.5" opacity=".7" x1="307" x2="307" y1="178.33905123754803" y2="106.25406331852204"/>
+<line class="t0" stroke-width="1.5" opacity=".7" x1="540.0999999999999" x2="540.0999999999999" y1="267.5823651194402" y2="174.04718994397834"/>
+<polyline class="t0" fill="none" stroke-width="2" stroke-linejoin="round" points="73.9,94 307,129.1 540.0999999999999,222.7"/>
+<circle class="s0 ring" style="stroke-width:2" cx="73.9" cy="94" r="4.5"><title>k=3 · 100: 100% (95% CI 84%–100%, n=20)</title></circle>
+<circle class="s0 ring" style="stroke-width:2" cx="307" cy="129.1" r="4.5"><title>k=3 · 10k: 85% (95% CI 64%–95%, n=20)</title></circle>
+<circle class="s0 ring" style="stroke-width:2" cx="540.0999999999999" cy="222.7" r="4.5"><title>k=3 · 200k: 45% (95% CI 26%–66%, n=20)</title></circle>
+<line class="t1" stroke-width="1.5" opacity=".7" x1="81.9" x2="81.9" y1="131.7044493658144" y2="94"/>
+<line class="t1" stroke-width="1.5" opacity=".7" x1="315" x2="315" y1="164.44294030035965" y2="100.52061919229183"/>
+<line class="t1" stroke-width="1.5" opacity=".7" x1="548.0999999999999" x2="548.0999999999999" y1="164.44294030035965" y2="100.52061919229183"/>
+<polyline class="t1" fill="none" stroke-width="2" stroke-linejoin="round" points="81.9,94 315,117.4 548.0999999999999,117.4"/>
+<circle class="s1 ring" style="stroke-width:2" cx="81.9" cy="94" r="4.5"><title>k=10 · 100: 100% (95% CI 84%–100%, n=20)</title></circle>
+<circle class="s1 ring" style="stroke-width:2" cx="315" cy="117.4" r="4.5"><title>k=10 · 10k: 90% (95% CI 70%–97%, n=20)</title></circle>
+<circle class="s1 ring" style="stroke-width:2" cx="548.0999999999999" cy="117.4" r="4.5"><title>k=10 · 200k: 90% (95% CI 70%–97%, n=20)</title></circle>
+<rect class="s1" x="560.0999999999999" y="112.4" width="8" height="8" rx="2"/><text class="ink" x="572.0999999999999" y="120.4">k=10 90%</text>
+<rect class="s0" x="560.0999999999999" y="217.7" width="8" height="8" rx="2"/><text class="ink" x="572.0999999999999" y="225.7">k=3 45%</text>
+</svg>
