@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Pacer, expandSweep } from '../src/experiment.js';
+import { compactTaskIds, expandTaskIds } from '../src/results.js';
 
 test('expandSweep order and keys', () => {
   const specs = expandSweep({
@@ -60,4 +61,10 @@ test('Pacer pauses on window pressure and on non-allowed status (not on warnings
   await pacer.wait();
   assert.equal(slept, 630_000 + 6 * 3600_000);
   assert.equal(log.length, 2);
+});
+
+test('task ranges expand and compact back', () => {
+  const ids = expandTaskIds('t001-t003,t010,t031-t032');
+  assert.deepEqual(ids, ['t001', 't002', 't003', 't010', 't031', 't032']);
+  assert.equal(compactTaskIds(ids), 't001-t003,t010,t031-t032');
 });

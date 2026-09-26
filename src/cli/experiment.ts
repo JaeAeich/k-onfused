@@ -6,7 +6,7 @@ import { expandSweep, runSweep, type SweepSpec } from '../experiment.js';
 import { Embedder } from '../index/embed.js';
 import { RERANKERS, Reranker, type RerankerName } from '../index/rerank.js';
 import { ToolIndex } from '../index/qdrant.js';
-import { RESULTS_FILE, existingKeys } from '../results.js';
+import { RESULTS_FILE, existingKeys, expandTaskIds } from '../results.js';
 import { flushTelemetry, telemetryEnabled } from '../telemetry.js';
 import type { Backend, Mode } from '../types.js';
 
@@ -24,7 +24,7 @@ const o = new Command()
     `cross-encoder for rerank mode: ${Object.keys(RERANKERS).join(' | ')}`,
     config.reranker,
   )
-  .option('--tasks <sel>', 'all | first:<n> | t001,t002', 'all')
+  .option('--tasks <sel>', 'all | first:<n> | t001,t002 | t001-t015', 'all')
   .option('--repeats <n>', 'repeats per configuration', '3')
   .option('--concurrency <n>', 'parallel trials', '2')
   .option('--backend <b>', 'claude-code | openrouter', config.backend)
@@ -54,9 +54,7 @@ const taskIds =
     ? tasks.map((t) => t.task_id)
     : o.tasks.startsWith('first:')
       ? tasks.slice(0, Number(o.tasks.slice(6))).map((t) => t.task_id)
-      : String(o.tasks)
-          .split(',')
-          .map((s) => s.trim());
+      : expandTaskIds(String(o.tasks));
 const Ns = csvNums(o.N).filter((N) => {
   if (N > tools.length) console.warn(`skipping N=${N}: only ${tools.length} tools indexed`);
   return N <= tools.length;

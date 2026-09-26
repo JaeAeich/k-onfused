@@ -44,3 +44,28 @@ export function readResults(file = RESULTS_FILE): TrialRecord[] {
 
 export const existingKeys = (file = RESULTS_FILE): Set<string> =>
   new Set(readResults(file).map((r) => r.trial_key));
+
+/** "t001-t003,t010" → ["t001", "t002", "t003", "t010"]; plain ids pass through. */
+export function expandTaskIds(sel: string): string[] {
+  return sel.split(',').flatMap((part) => {
+    const m = /^t(\d+)-t(\d+)$/.exec(part.trim());
+    if (!m) return [part.trim()];
+    const [a, b, width] = [Number(m[1]), Number(m[2]), m[1]!.length];
+    return Array.from({ length: b - a + 1 }, (_, i) => `t${String(a + i).padStart(width, '0')}`);
+  });
+}
+
+/** The inverse: collapse consecutive ids into ranges. */
+export function compactTaskIds(ids: string[]): string {
+  const nums = ids.map((id) => Number(id.slice(1))).sort((a, b) => a - b);
+  const width = ids[0]?.length ? ids[0].length - 1 : 3;
+  const t = (n: number) => `t${String(n).padStart(width, '0')}`;
+  const out: string[] = [];
+  for (let i = 0; i < nums.length; i++) {
+    let j = i;
+    while (j + 1 < nums.length && nums[j + 1] === nums[j]! + 1) j++;
+    out.push(j > i ? `${t(nums[i]!)}-${t(nums[j]!)}` : t(nums[i]!));
+    i = j;
+  }
+  return out.join(',');
+}
