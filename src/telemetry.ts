@@ -112,7 +112,7 @@ export function spanTreeFromRecord(r: TrialRecord): SpanNode {
     start: t0,
     end: t0 + r.latency_ms,
     attributes: {
-      'openinference.project.name': 'toolscale',
+      'openinference.project.name': 'k-onfused',
       'input.value': r.task.prompt,
       'output.value': r.metrics.success ? 'PASS' : `FAIL ${r.failure_type}`,
       'eval.trial_key': r.trial_key,
@@ -228,12 +228,12 @@ function getTracer(): Tracer | null {
   if (!tracer) {
     provider = new BasicTracerProvider({
       resource: resourceFromAttributes({
-        'service.name': 'toolscale',
-        'openinference.project.name': 'toolscale',
+        'service.name': 'k-onfused',
+        'openinference.project.name': 'k-onfused',
       }),
       spanProcessors: [new BatchSpanProcessor(new OTLPTraceExporter({ url: config.otlpEndpoint }))],
     });
-    tracer = provider.getTracer('toolscale');
+    tracer = provider.getTracer('k-onfused');
   }
   return tracer;
 }

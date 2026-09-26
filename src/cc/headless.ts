@@ -91,7 +91,7 @@ function buildArgs(o: HeadlessOptions): string[] {
       [MCP_SERVER_NAME]: {
         command: process.execPath,
         args: [TSX, SHIM],
-        env: { TOOLSCALE_BRIDGE: o.bridgeUrl },
+        env: { KONFUSED_BRIDGE: o.bridgeUrl },
       },
     },
   });
