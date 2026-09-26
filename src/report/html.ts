@@ -44,19 +44,19 @@ export function buildReportHtml(trials: TrialRecord[], tools: ToolDef[], fragmen
   };
   const script = [inlineModule('stats.ts'), inlineModule('render.ts')].join('\n');
   const head = fragment
-    ? `<title>ToolScale Results</title>\n<style>${CSS}</style>`
+    ? `<title>k-onfused results</title>\n<style>${CSS}</style>`
     : `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ToolScale Results</title>
+<title>k-onfused results</title>
 <style>${CSS}</style>
 </head>
 <body>`;
   return `${head}
 <main>
-  <h1>ToolScale — how agents break as tool catalogs grow</h1>
+  <h1>k-onfused: how agents cope as tool catalogs grow</h1>
   <div id="meta" class="muted"></div>
   <div id="filters"></div>
   <div id="tiles"></div>
@@ -71,9 +71,8 @@ export function buildReportHtml(trials: TrialRecord[], tools: ToolDef[], fragmen
   <h2>Trials</h2>
   <div id="trial-filters"></div>
   <div class="table-wrap"><table id="trials"></table></div>
-  <div id="story">
-    <span class="muted">Click a trial to see its story: what the worker asked for, what was searched,
-    what came back, what got called, and why it failed.</span>
+  <div id="detail">
+    <span class="muted">Click a trial to see its searches and tool calls.</span>
   </div>
 </main>
 <script id="data" type="application/json">${jsonForScript({ generated: new Date().toISOString(), trials })}</script>

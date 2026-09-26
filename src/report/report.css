@@ -276,7 +276,7 @@ tr.fail td:nth-child(7) {
   font-size: 13px;
   margin: 0 0 6px;
 }
-#story {
+#detail {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 10px;

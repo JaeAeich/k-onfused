@@ -2,7 +2,7 @@
  * Browser-side renderer for report.html. Transpiled and inlined by html.ts together with stats.ts
  * (imports below are stripped at build time; both files share one module scope in the page).
  * Reads the trial records from <script id="data">, then draws: filter row → stat tiles → charts →
- * trial table → trial story.
+ * trial table → one trial's searches and calls.
  */
 import {
   CONFUSER_BUCKETS,
@@ -615,7 +615,7 @@ function renderBreakdowns() {
   );
 }
 
-// ---------- trial table + story ----------
+// ---------- trial table + one trial ----------
 const tf = { mode: '', N: '', k: '', outcome: '' };
 function renderTrialTable() {
   const rows = trials.filter(
@@ -649,7 +649,6 @@ function renderTrialTable() {
     'llm calls',
     'tokens in',
     'latency s',
-    'key',
   ];
   const body = rows.map((t) => {
     const tr = el(
@@ -671,12 +670,11 @@ function renderTrialTable() {
           (t.usage.query_agent_llm_calls ? `+${t.usage.query_agent_llm_calls}` : ''),
         fmtNum(t.usage.input_tokens),
         (t.latency_ms / 1000).toFixed(1),
-        t.trial_key,
       ].map((v) => el('td', {}, String(v))),
     );
     tr.addEventListener('click', () => {
       history.replaceState(null, '', `#t-${t.trial_key}`);
-      renderStory(t);
+      renderTrial(t);
       document
         .querySelectorAll('#trials tr.selected')
         .forEach((r) => r.classList.remove('selected'));
@@ -691,7 +689,7 @@ function renderTrialTable() {
 }
 
 const toolName = (id: string | null) => id ?? '?';
-function renderStory(t: TrialRecord) {
+function renderTrial(t: TrialRecord) {
   const targets = targetsOf(t);
   const isTarget = (id: string | null) => id !== null && targets.includes(id);
   const json = (v: unknown) =>
@@ -760,7 +758,7 @@ function renderStory(t: TrialRecord) {
         return el('div', { class: 'ev' }, e.text);
     }
   };
-  $('#story').replaceChildren(
+  $('#detail').replaceChildren(
     el('h3', {}, `${t.task_id} · ${t.metrics.success ? 'PASS' : `FAIL (${t.failure_type})`}`),
     el('div', { class: 'quote' }, promptOf(t)),
     el(
@@ -770,11 +768,11 @@ function renderStory(t: TrialRecord) {
         `${t.confusers ? ` · look-alikes ${t.confusers.same_action} (same vendor ${t.confusers.same_vendor})` : ''}` +
         ` · ${t.mode} · N=${t.N} k=${t.k}` +
         ` · ${t.model}${t.qa_model ? ` / qa ${t.qa_model}` : ''}` +
-        ` · ${t.trial_key}${t.error ? ` · error: ${t.error}` : ''}`,
+        `${t.error ? ` · error: ${t.error}` : ''}`,
     ),
     ...t.events.map(row),
   );
-  $('#story').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  $('#detail').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 // tool names for search hits come from a side table (tool_id → name) embedded with the data
@@ -796,8 +794,8 @@ renderTrialTable();
 const params = new URLSearchParams(location.search);
 const theme = params.get('theme'); // ?theme=light|dark overrides the OS setting (also handy for screenshots)
 if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme;
-// deep link to a trial story: #t-<trial_key> (a plain hash works both locally and when hosted)
+// deep link to a trial: #t-<trial_key> (a plain hash works both locally and when hosted)
 const linked = /^#t-([0-9a-f]+)$/.exec(location.hash)?.[1] ?? params.get('trial');
 const linkedTrial = linked && trials.find((t) => t.trial_key === linked);
-if (linkedTrial) renderStory(linkedTrial);
+if (linkedTrial) renderTrial(linkedTrial);
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', renderAll);
