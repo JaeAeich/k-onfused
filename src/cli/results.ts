@@ -6,7 +6,7 @@ import { execSync } from 'node:child_process';
 import { Command } from 'commander';
 import { config } from '../config.js';
 import { readTasks, readTools, tasksFile, toolsFile } from '../data.js';
-import { RESULTS_FILE, readResults } from '../results.js';
+import { RESULTS_FILE, compactTaskIds, readResults } from '../results.js';
 import { buildReportHtml } from '../report/html.js';
 import { targetsOf, uniqueSorted } from '../report/stats.js';
 import { buildWriteup, type Manifest } from '../report/writeup.js';
@@ -55,23 +55,25 @@ const started = records.map((r) => r.started_at).sort();
 const manifest: Manifest = {
   run_id: o.runId,
   generated_at: new Date().toISOString(),
-  command: [
-    'npm run experiment --',
-    `--N ${u(records.map((r) => r.N)).join(',')}`,
-    `--k ${u(records.map((r) => r.k)).join(',')}`,
-    `--mode ${u(records.map((r) => r.mode)).join(',')}`,
-    `--tasks ${taskIds.join(',')}`,
-    `--repeats ${Math.max(...records.map((r) => r.repeat)) + 1}`,
-    `--model ${models.join(',')}`,
-    ...(qaModels.length && qaModels.join() !== models.join()
-      ? [`--qa-model ${qaModels.join(',')}`]
-      : []),
-    ...u(records.map((r) => r.reranker).filter((x): x is string => !!x)).map(
-      (x) => `--reranker ${x}`,
-    ),
-    `--seed ${u(records.map((r) => r.seed)).join(',')}`,
-    `--run-id ${o.runId}`,
-  ].join(' '),
+  // one sweep per retrieval mode, since modes may have run over different N and k
+  commands: u(records.map((r) => r.mode)).map((mode) => {
+    const rs = records.filter((r) => r.mode === mode);
+    const qa = u(rs.map((r) => r.qa_model).filter((x): x is string => !!x));
+    const rr = u(rs.map((r) => r.reranker).filter((x): x is string => !!x));
+    return [
+      'npm run experiment --',
+      `--N ${u(rs.map((r) => r.N)).join(',')}`,
+      `--k ${u(rs.map((r) => r.k)).join(',')}`,
+      `--mode ${mode}`,
+      `--tasks ${compactTaskIds(u(rs.map((r) => r.task_id)))}`,
+      `--repeats ${Math.max(...rs.map((r) => r.repeat)) + 1}`,
+      `--model ${u(rs.map((r) => r.model)).join(',')}`,
+      ...(qa.length && qa.join() !== u(rs.map((r) => r.model)).join() ? [`--qa-model ${qa}`] : []),
+      ...rr.map((x) => `--reranker ${x}`),
+      `--seed ${u(rs.map((r) => r.seed)).join(',')}`,
+      `--run-id ${o.runId}`,
+    ].join(' ');
+  }),
   trials: records.length,
   errors: records.filter((r) => r.error).length,
   first_trial_at: started[0]!,

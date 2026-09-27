@@ -9,7 +9,7 @@ pre-commit:
       run: npx eslint {staged_files}
     markdownlint:
       glob: '*.md'
-      exclude: 'results/*/README.md'
+      exclude: 'results/*/{README,details}.md'
       run: npx markdownlint-cli2 {staged_files}
     typecheck:
       glob: '*.ts'

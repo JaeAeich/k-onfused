@@ -21,7 +21,8 @@ import { lineChartSvg, stackedBarsSvg } from './svg.js';
 export interface Manifest {
   run_id: string;
   generated_at: string;
-  command: string;
+  /** one experiment command per retrieval mode */
+  commands: string[];
   trials: number;
   errors: number;
   first_trial_at: string;
@@ -56,11 +57,11 @@ export interface WriteupInput {
 const fmtN = (n: number) => (n >= 1000 ? `${n / 1000}k` : String(n));
 const pct = (p: number) => (Number.isNaN(p) ? '–' : `${Math.round(p * 100)}%`);
 const ci = (r: { p: number; lo: number; hi: number }) =>
-  Number.isNaN(r.p) ? '–' : `${pct(r.p)} (${pct(r.lo)}–${pct(r.hi)})`;
+  Number.isNaN(r.p) ? '–' : `${pct(r.p)} (${Math.round(r.lo * 100)}–${Math.round(r.hi * 100)})`;
 const cellText = (s: string) => s.replace(/\|/g, '\\|').replace(/\s+/g, ' ').trim();
 const table = (head: string[], rows: (string | number)[][]) =>
   [
-    `| ${head.join(' | ')} |`,
+    `| ${head.map(cellText).join(' | ')} |`,
     `|${head.map(() => '---').join('|')}|`,
     ...rows.map((r) => `| ${r.map((c) => cellText(String(c))).join(' | ')} |`),
   ].join('\n');
@@ -96,51 +97,57 @@ type Call = Extract<TraceEvent, { type: 'tool_call' }>;
 
 /** One line on why a trial failed, read off its trace. */
 export function whatHappened(r: TrialRecord, names: Map<string, string>): string {
-  const nm = (id: string) => names.get(id) ?? id;
+  const code = (xs: string[]) => [...new Set(xs)].map((x) => `\`${x}\``).join(', ');
+  const clip = (t: string, n: number) => (t.length > n ? `${t.slice(0, n - 1).trimEnd()}…` : t);
   const targets = targetsOf(r);
   const calls = r.events.filter((e): e is Call => e.type === 'tool_call');
   const delivered = new Set(
     r.events.flatMap((e) => (e.type === 'retrieval' ? e.hits.map((h) => h.tool_id) : [])),
   );
-  const needs = r.events.flatMap((e) => (e.type === 'retrieval' ? [`"${e.need}"`] : []));
-  const uniq = (xs: string[]) => [...new Set(xs)].join(', ');
+  const needs = r.events.flatMap((e) => (e.type === 'retrieval' ? [e.need] : []));
   const parts =
     (r.metrics.parts_total ?? 1) > 1
-      ? ` [${r.metrics.parts_done}/${r.metrics.parts_total} parts done]`
+      ? ` (${r.metrics.parts_done} of ${r.metrics.parts_total} parts done)`
       : '';
   const base = (() => {
     switch (r.failure_type) {
-      case 'retrieval_miss':
-        return (
-          `never received ${uniq(targets.filter((t) => !delivered.has(t)).map(nm))};` +
-          ` asked for ${needs.join(', ') || '(nothing)'}`
-        );
+      case 'retrieval_miss': {
+        const missing = targets.filter((t) => !delivered.has(t)).map((t) => names.get(t) ?? t);
+        const asked = needs
+          .slice(0, 2)
+          .map((n) => `"${clip(n, 60)}"`)
+          .join(', ');
+        const more = needs.length > 2 ? ` and ${needs.length - 2} more` : '';
+        return `never got ${code(missing)}; searched ${asked || 'nothing'}${more}`;
+      }
       case 'wrong_tool': {
         const called = calls.filter((c) => c.tool_id && !targets.includes(c.tool_id));
         const missed = targets.filter((t) => !calls.some((c) => c.tool_id === t));
-        return `called ${uniq(called.map((c) => bare(c.tool_name)))} instead of ${uniq(missed.map(nm))}`;
+        return `called ${code(called.map((c) => bare(c.tool_name)))} instead of ${code(
+          missed.map((t) => names.get(t) ?? t),
+        )}`;
       }
       case 'bad_args': {
         const c = calls.filter((x) => x.tool_id && targets.includes(x.tool_id)).at(-1);
-        return c
-          ? `called ${bare(c.tool_name)} with ${short(c.args)}${c.valid ? '' : ' (schema-invalid)'}`
-          : '';
+        return c ? `called ${code([bare(c.tool_name)])} with ${short(c.args, 70)}` : '';
       }
-      case 'hallucinated_tool':
-        return `called nonexistent ${uniq(calls.filter((c) => c.tool_id === null).map((c) => bare(c.tool_name)))}`;
+      case 'hallucinated_tool': {
+        const made = calls.filter((c) => c.tool_id === null).map((c) => bare(c.tool_name));
+        return `called ${code(made)}, which doesn't exist`;
+      }
       case 'gave_up': {
         const f = r.events.find((e) => e.type === 'finish');
-        return f && f.type === 'finish'
-          ? `finish(${f.status}): ${f.summary.slice(0, 120)}`
-          : 'stopped without calling finish';
+        if (!f || f.type !== 'finish') return 'stopped without finishing';
+        const said = f.summary.replace(/mcp__ts__/g, '').split(/(?<=[.!?])\s/)[0] ?? '';
+        return `said "${clip(said, 110)}"`;
       }
       case 'step_limit':
-        return `hit the turn cap after ${r.metrics.steps} steps`;
+        return `ran out of turns after ${r.metrics.steps} steps`;
       default:
         return '';
     }
   })();
-  return (r.error ? `error: ${r.error.slice(0, 100)}; ` : '') + base + parts;
+  return (r.error ? `error: ${clip(r.error, 80)}; ` : '') + base + parts;
 }
 
 interface Group {
@@ -194,68 +201,30 @@ function flips(a: TrialRecord[], b: TrialRecord[]) {
   };
 }
 
-function pairedSection(g: Group): string {
+function pairedTable(g: Group): string {
   const Ns = uniqueSorted(g.rows.map((r) => r.N));
   const ks = uniqueSorted(g.rows.map((r) => r.k));
-  const out: string[][] = [];
-  const pair = (
-    fixed: string,
-    a: TrialRecord[],
-    b: TrialRecord[],
-    labelA: string,
-    labelB: string,
-  ) => {
-    const f = flips(a, b);
-    out.push(
-      [
-        fixed,
-        `${labelA} → ${labelB}`,
-        f.pairs,
-        f.both,
-        f.onlyA,
-        f.onlyB,
-        f.neither,
-        f.p.toFixed(3),
-      ].map(String),
-    );
-  };
   const at = (N: number, k: number) => g.rows.filter((r) => r.N === N && r.k === k);
+  const rows: string[][] = [];
+  const pair = (fixed: string, a: TrialRecord[], b: TrialRecord[], change: string) => {
+    const f = flips(a, b);
+    rows.push([fixed, change, f.both, f.onlyA, f.onlyB, f.neither, f.p.toFixed(3)].map(String));
+  };
+  const [n0, n1, k0, k1] = [Ns[0]!, Ns.at(-1)!, ks[0]!, ks.at(-1)!];
   if (Ns.length > 1)
-    for (const k of ks)
-      pair(
-        `k=${k}`,
-        at(Ns[0]!, k),
-        at(Ns.at(-1)!, k),
-        `N=${fmtN(Ns[0]!)}`,
-        `N=${fmtN(Ns.at(-1)!)}`,
-      );
+    for (const k of ks) pair(`k=${k}`, at(n0, k), at(n1, k), `N ${fmtN(n0)} → ${fmtN(n1)}`);
   if (ks.length > 1)
-    for (const N of Ns)
-      pair(`N=${fmtN(N)}`, at(N, ks[0]!), at(N, ks.at(-1)!), `k=${ks[0]}`, `k=${ks.at(-1)}`);
-  if (!out.length) return '';
-  return [
-    'Same task, two settings: does it pass in one and fail in the other? Only the tasks that flip carry',
-    'information; the exact McNemar test asks whether the flips lean one way more than chance would.',
-    '',
-    table(
-      [
-        'held fixed',
-        'comparison',
-        'pairs',
-        'pass both',
-        'pass only first',
-        'pass only second',
-        'fail both',
-        'p (exact McNemar)',
-      ],
-      out,
-    ),
-  ].join('\n');
+    for (const N of Ns) pair(`N=${fmtN(N)}`, at(N, k0), at(N, k1), `k ${k0} → ${k1}`);
+  if (!rows.length) return '';
+  return table(
+    ['fixed', 'change', 'pass both', 'only before', 'only after', 'fail both', 'p'],
+    rows,
+  );
 }
 
 function breakdownTable(rows: BreakdownRow[], first: string): string {
   return table(
-    [first, 'n', 'success (95% CI)', 'recall@k', 'select | hit', 'parts done'],
+    [first, 'n', 'success', 'delivered', 'picked when delivered', 'parts done'],
     rows.map((b) => [
       b.key,
       b.n,
@@ -274,21 +243,23 @@ const MODE_SHORT: Record<string, string> = {
   query_agent: 'librarian',
 };
 const MODE_TEXT: Record<string, string> = {
+  direct: '**direct**: embed the request, hand over the top k.',
   rerank:
-    'In `rerank` mode the vector search returns its top 50 and a small local cross-encoder' +
-    ' (one forward pass, no LLM) re-orders them; the worker gets the top k.',
-  query_agent:
-    "In `query_agent` mode a second model (the librarian) turns the agent's request into one or more" +
-    ' filtered searches (by app, resource, action) and hands back ≤ k tools.',
+    '**re-ranker**: take the top 50, re-order them with a small local cross-encoder, hand over k.',
+  query_agent: '**librarian**: a second model runs filtered searches and picks up to k.',
 };
 
-/** Every retrieval mode vs direct on the settings both ran (same model), incl. what each costs. */
-function modeComparison(records: TrialRecord[], files: Record<string, string>): string {
+/** Every retrieval mode vs direct on the settings both ran: a short summary and the full tables. */
+function modeComparison(
+  records: TrialRecord[],
+  files: Record<string, string>,
+): { main: string; details: string } {
+  const none = { main: '', details: '' };
   const modes = uniqueSorted(records.map((r) => r.mode)).sort(
     (a, b) => MODE_ORDER.indexOf(a) - MODE_ORDER.indexOf(b),
   );
   const others = modes.filter((m) => m !== 'direct');
-  if (!modes.includes('direct') || !others.length) return '';
+  if (!modes.includes('direct') || !others.length) return none;
   type Setting = { model: string; N: number; k: number };
   const at = (mode: string, s: Setting) =>
     records.filter((r) => r.mode === mode && r.model === s.model && r.N === s.N && r.k === s.k);
@@ -299,10 +270,9 @@ function modeComparison(records: TrialRecord[], files: Record<string, string>): 
     })
     .filter((s) => at('direct', s).length && others.some((m) => at(m, s).length))
     .sort((a, b) => a.N - b.N || a.k - b.k);
-  if (!settings.length) return '';
-  const label = (s: Setting) => `N=${fmtN(s.N)} · k=${s.k}`;
-  const oneN = uniqueSorted(settings.map((s) => s.N)).length === 1;
-  const xOf = (s: Setting) => (oneN ? `k=${s.k}` : label(s));
+  if (!settings.length) return none;
+  const Ns = uniqueSorted(settings.map((s) => s.N));
+  const label = (s: Setting) => (Ns.length === 1 ? `k=${s.k}` : `N=${fmtN(s.N)} · k=${s.k}`);
   const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : NaN);
   const rerankMs = (rs: TrialRecord[]) =>
     mean(
@@ -312,13 +282,13 @@ function modeComparison(records: TrialRecord[], files: Record<string, string>): 
         ),
       ),
     );
-  const rerankers = uniqueSorted(records.map((r) => r.reranker).filter((x): x is string => !!x));
+  const where = Ns.length === 1 ? ` at ${fmtN(Ns[0]!)} tools` : '';
 
   files['figures/modes.svg'] = lineChartSvg({
-    title: 'Retrieval methods compared: success rate',
+    title: `Search methods compared${where}`,
     subtitle: 'same tasks, same catalogs · whiskers = 95% CI',
-    xLabel: oneN ? `tools per search · N=${fmtN(settings[0]!.N)}` : 'setting',
-    xs: settings.map(xOf),
+    xLabel: 'tools per search',
+    xs: settings.map(label),
     series: modes.map((mode) => ({
       name: MODE_SHORT[mode] ?? mode,
       slot: Math.max(0, MODE_ORDER.indexOf(mode)),
@@ -326,160 +296,148 @@ function modeComparison(records: TrialRecord[], files: Record<string, string>): 
         const rs = at(mode, s);
         if (!rs.length) return [];
         const c = aggregate(rs)[0]!;
-        return [{ x: xOf(s), y: c.success.p, lo: c.success.lo, hi: c.success.hi, n: c.n }];
+        return [{ x: label(s), y: c.success.p, lo: c.success.lo, hi: c.success.hi, n: c.n }];
       }),
     })),
   });
 
-  const rows = settings.flatMap((s) =>
-    modes.flatMap((mode) => {
-      const rs = at(mode, s);
-      if (!rs.length) return [];
-      const c = aggregate(rs)[0]!;
-      const ms = rerankMs(rs);
-      return [
-        [
-          label(s),
-          MODE_SHORT[mode] ?? mode,
-          c.n,
-          ci(c.success),
-          pct(c.retrieval_hit.p),
-          pct(c.selection_given_hit.p),
-          c.mean_llm_calls.toFixed(1),
-          `${(c.mean_input_tokens / 1000).toFixed(0)}k`,
-          (c.mean_latency_ms / 1000).toFixed(0),
-          Number.isNaN(ms) ? '–' : `${Math.round(ms)}`,
-          `$${mean(rs.map((r) => r.cost_usd)).toFixed(3)}`,
-        ],
-      ];
-    }),
-  );
+  const perMode = (full: boolean) =>
+    settings.flatMap((s) =>
+      modes.flatMap((mode) => {
+        const rs = at(mode, s);
+        if (!rs.length) return [];
+        const c = aggregate(rs)[0]!;
+        const name = MODE_SHORT[mode] ?? mode;
+        const calls = c.mean_llm_calls.toFixed(1);
+        const secs = (c.mean_latency_ms / 1000).toFixed(0);
+        if (!full) return [[label(s), name, pct(c.success.p), pct(c.retrieval_hit.p), calls, secs]];
+        return [
+          [
+            label(s),
+            name,
+            c.n,
+            ci(c.success),
+            pct(c.retrieval_hit.p),
+            pct(c.selection_given_hit.p),
+            calls,
+            `${(c.mean_input_tokens / 1000).toFixed(0)}k`,
+            secs,
+            `$${mean(rs.map((r) => r.cost_usd)).toFixed(3)}`,
+          ],
+        ];
+      }),
+    );
+  const rerankTrials = records.filter((r) => r.mode === 'rerank');
+  const rerankNote = rerankTrials.length
+    ? ` The re-ranker took about ${Math.round(rerankMs(rerankTrials))} ms per search on CPU.`
+    : '';
+  const head = ['setting', 'method', 'success', 'delivered', 'model calls', 'seconds'];
   const paired = settings.flatMap((s) =>
     others.flatMap((mode) => {
       if (!at(mode, s).length) return [];
       const f = flips(at('direct', s), at(mode, s));
-      return [
-        [
-          label(s),
-          MODE_SHORT[mode] ?? mode,
-          f.pairs,
-          f.both,
-          f.onlyA,
-          f.onlyB,
-          f.neither,
-          f.p.toFixed(3),
-        ],
-      ];
+      const name = MODE_SHORT[mode] ?? mode;
+      return [[label(s), name, f.both, f.onlyA, f.onlyB, f.neither, f.p.toFixed(3)]];
     }),
   );
-  return [
-    '## Retrieval methods compared',
-    '',
-    "`direct`: the agent's request is embedded and the top-k tools from the vector search are handed over.",
-    ...others.map((m) => MODE_TEXT[m] ?? ''),
-    rerankers.length ? `Cross-encoder used: ${rerankers.join(', ')}.` : '',
-    'Same tasks, same catalogs.',
-    '',
-    '![Retrieval methods](figures/modes.svg)',
-    '',
-    table(
-      [
-        'setting',
-        'method',
-        'n',
-        'success (95% CI)',
-        'recall@k',
-        'select | hit',
-        'LLM calls / trial',
-        'input tokens / trial',
-        'seconds / trial',
-        're-rank ms / search',
-        'API-price estimate / trial',
-      ],
-      rows,
-    ),
-    '',
-    'API-price estimate = what Claude Code reports the trial would cost at API prices (nothing is billed on',
-    'a subscription); the re-ranker runs locally and costs nothing.',
-    '',
-    'Task by task, each method against direct on the same task:',
-    '',
-    table(
-      [
-        'setting',
-        'method',
-        'pairs',
-        'pass both',
-        'pass only direct',
-        'pass only method',
-        'fail both',
-        'p (exact McNemar)',
-      ],
-      paired,
-    ),
-  ].join('\n');
+  return {
+    main: [
+      `## Search methods${where}`,
+      '',
+      modes.map((m) => `- ${MODE_TEXT[m] ?? m}`).join('\n'),
+      '',
+      '![Search methods compared](figures/modes.svg)',
+      '',
+      table(head, perMode(false)),
+    ].join('\n'),
+    details: [
+      '## Search methods',
+      '',
+      'Per trial averages. The price is what Claude Code reports the trial would cost at API prices' +
+        ' (nothing is billed on a subscription).' +
+        rerankNote,
+      '',
+      table(
+        [
+          'setting',
+          'method',
+          'n',
+          'success',
+          'delivered',
+          'picked when delivered',
+          'model calls',
+          'input tokens',
+          'seconds',
+          'price',
+        ],
+        perMode(true),
+      ),
+      '',
+      'Each method against direct, task by task:',
+      '',
+      table(
+        ['setting', 'method', 'pass both', 'only direct', 'only method', 'fail both', 'p'],
+        paired,
+      ),
+    ].join('\n'),
+  };
 }
 
-const minute = (iso: string) => iso.slice(0, 16).replace('T', ' ');
+/** Break a long shell command into `\`-continued lines of at most `width` characters. */
+export function wrapCommand(cmd: string, width = 90): string {
+  const parts = cmd.split(/ (?=--[a-z])/);
+  const lines = [parts[0]!];
+  for (const part of parts.slice(1)) {
+    if (lines.at(-1)!.length + part.length + 3 > width) lines.push(`  ${part}`);
+    else lines[lines.length - 1] += ` ${part}`;
+  }
+  return lines.join(' \\\n');
+}
+
+const outcomeCats = [
+  { name: 'pass', slot: 'neutral' as const },
+  ...FAILURE_TYPES.map((f, idx) => ({ name: f.replace('_', ' '), slot: idx })),
+];
 
 export function buildWriteup(i: WriteupInput): Record<string, string> {
   const m = i.manifest;
   const files: Record<string, string> = {};
   const md: string[] = [];
+  const dt: string[] = [];
   const groups = groupsOf(i.records);
-  const kinds = breakdown(i.records, taskKind, ['single', 'chain', 'cross_app']);
   const tasksUsed = i.tasks.filter((t) => m.tasks.includes(t.task_id));
   const kindOf = (t: Task) =>
     t.tags.multi_step ? (t.tags.cross_app ? 'cross_app' : 'chain') : 'single';
-  const nKind = (k: string) => tasksUsed.filter((t) => kindOf(t) === k).length;
-  const tokens = i.records.reduce((a, r) => a + r.usage.input_tokens + r.usage.output_tokens, 0);
+  const days = [m.first_trial_at, m.last_trial_at].map((d) => d.slice(0, 10));
+  const modes = modeComparison(i.records, files);
 
   md.push(
-    `# ToolScale results · run \`${m.run_id}\``,
+    `# Results: \`${m.run_id}\``,
     '',
-    '**Question.** When an agent has to find its tools by searching a catalog, how does its success change as',
-    'the catalog grows (N) and as each search returns more or fewer tools (k)?',
+    [
+      m.models.join(', '),
+      `${m.tasks.length} tasks`,
+      `catalogs of ${m.N.map(fmtN).join(' / ')} tools`,
+      `${m.trials} trials`,
+      days[0] === days[1] ? days[0] : `${days[0]} → ${days[1]}`,
+    ].join(' · '),
     '',
-    `**Setup.** ${m.tasks.length} tasks (${nKind('single')} single-step,` +
-      ` ${nKind('chain')} chain, ${nKind('cross_app')} cross-app),` +
-      ` ${m.repeats} repeat${m.repeats > 1 ? 's' : ''}: ${m.modes
-        .map((mode) => {
-          const rs = i.records.filter((r) => r.mode === mode);
-          return `${mode} retrieval at N ${uniqueSorted(rs.map((r) => r.N))
-            .map(fmtN)
-            .join(
-              ' / ',
-            )} × k ${uniqueSorted(rs.map((r) => r.k)).join(' / ')} (${rs.length} trials)`;
-        })
-        .join('; ')}. **${m.trials} trials** on ${m.models.join(', ')}` +
-      ` (${m.backend.join(', ')} backend)` +
-      `, ${minute(m.first_trial_at)} → ${minute(m.last_trial_at)} UTC.` +
-      ` ${m.errors} trial${m.errors === 1 ? '' : 's'}` +
-      ` ended in a harness/model error (counted as failures).` +
-      ` ${(tokens / 1e6).toFixed(2)}M tokens total.`,
+    i.findings?.trim() || '_No findings yet: add `FINDINGS.md` here and re-run `npm run results`._',
     '',
-    `All tools and tasks are synthetic and deterministic (generator \`${m.gen_version.join(', ')}\`);` +
-      ` tool calls hit a schema-checking mock.` +
-      ` A trial passes only if every expected call is made with the right arguments.` +
-      ` Numbers in parentheses are 95% Wilson intervals:` +
-      ` with ~${Math.round(
-        i.records.length /
-          Math.max(
-            1,
-            groups.reduce((a, g) => a + g.cells.length, 0),
-          ),
-      )} trials per cell they are wide,` +
-      ` so read differences inside overlapping intervals as "not shown", not as "no effect".`,
+  );
+  dt.push(
+    `# Details: \`${m.run_id}\``,
     '',
-    '## Findings',
-    '',
-    i.findings?.trim() ||
-      '_Not written yet: add `FINDINGS.md` to this folder and re-run `npm run results`._',
+    'Percentages in parentheses are 95% Wilson intervals. `p` is an exact McNemar test on the tasks that',
+    'pass in one setting and fail in the other.',
     '',
   );
 
+  const outcomes: string[] = [];
+  const curveGroups = groups.filter((g) => uniqueSorted(g.rows.map((r) => r.N)).length > 1).length;
   for (const g of groups) {
-    const suffix = g.label ? ` · ${g.label}` : '';
+    const suffix = g.label ? ` (${g.label})` : '';
+    const curveSuffix = curveGroups > 1 ? suffix : '';
     const slug = `${g.mode}-${g.model}`.replace(/[^a-z0-9]+/gi, '-').toLowerCase();
     const Ns = uniqueSorted(g.cells.map((c) => c.N));
     const ks = uniqueSorted(g.cells.map((c) => c.k));
@@ -489,113 +447,113 @@ export function buildWriteup(i: WriteupInput): Record<string, string> {
         slot: si,
         points: g.cells
           .filter((c) => c.k === k)
-          .map((c) => ({
-            x: fmtN(c.N),
-            y: pick(c).p,
-            lo: pick(c).lo,
-            hi: pick(c).hi,
-            n: pick(c).n,
-          })),
+          .map((c) => {
+            const r = pick(c);
+            return { x: fmtN(c.N), y: r.p, lo: r.lo, hi: r.hi, n: r.n };
+          }),
       }));
-    const byNk = (pick: (c: Cell) => Cell['success']) =>
+    const byNk = (pick: (c: Cell) => Cell['success'], withCi = false) =>
       table(
-        ['N', ...ks.map((k) => `k=${k}`)],
+        ['tools', ...ks.map((k) => `k=${k}`)],
         Ns.map((N) => [
           fmtN(N),
           ...ks.map((k) => {
             const c = g.cells.find((x) => x.N === N && x.k === k);
-            return c ? `${ci(pick(c))} n=${pick(c).n}` : '–';
+            return c ? (withCi ? ci(pick(c)) : pct(pick(c).p)) : '–';
           }),
         ]),
       );
 
-    // a curve needs ≥ 2 catalog sizes (a mode run at one N is covered by the mode comparison)
-    const curve = Ns.length > 1;
-    if (curve)
-      files[`figures/success-${slug}.svg`] = lineChartSvg({
-        title: `Success rate vs catalog size${suffix}`,
-        subtitle: 'one line per k (tools returned per search) · whiskers = 95% CI',
-        xLabel: 'catalog size N',
-        xs: Ns.map(fmtN),
-        series: series((c) => c.success),
-      });
-    if (curve)
-      files[`figures/recall-${slug}.svg`] = lineChartSvg({
-        title: `Recall@k: target delivered to the agent${suffix}`,
-        subtitle: 'did any search hand the agent every target tool? · whiskers = 95% CI',
-        xLabel: 'catalog size N',
-        xs: Ns.map(fmtN),
-        series: series((c) => c.retrieval_hit),
-      });
-    const outcomeCats = [
-      { name: 'pass', slot: 'neutral' as const },
-      ...FAILURE_TYPES.map((f, idx) => ({ name: f.replace('_', ' '), slot: idx })),
-    ];
-    const outcomeRows = g.cells.map((c) => ({
-      label: `N=${fmtN(c.N)} · k=${c.k}`,
-      counts: [Math.round(c.success.p * c.n), ...FAILURE_TYPES.map((f) => c.failures[f])],
-    }));
     files[`figures/outcomes-${slug}.svg`] = stackedBarsSvg({
       title: `How trials ended${suffix}`,
-      subtitle: 'failure type = first thing that went wrong (see definitions below)',
+      subtitle: 'first thing that went wrong',
       categories: outcomeCats,
-      rows: outcomeRows,
+      rows: g.cells.map((c) => ({
+        label: `N=${fmtN(c.N)} · k=${c.k}`,
+        counts: [Math.round(c.success.p * c.n), ...FAILURE_TYPES.map((f) => c.failures[f])],
+      })),
     });
-
-    md.push(
-      `## Success vs catalog size${suffix}`,
-      '',
-      curve
-        ? `![Success rate vs N](figures/success-${slug}.svg)`
-        : '_One catalog size only: no curve._',
-      '',
-      byNk((c) => c.success),
-      '',
-      `## Retrieval: did the agent even get the right tool?${suffix}`,
-      '',
-      'If the target never reaches the agent, no model can succeed; this separates search failures from',
-      'choice failures.',
-      '',
-      curve ? `![Recall@k vs N](figures/recall-${slug}.svg)` : '',
-      '',
-      byNk((c) => c.retrieval_hit),
-      '',
-      'Given the target *was* delivered, how often did the agent call it?',
-      '',
-      byNk((c) => c.selection_given_hit),
-      '',
+    outcomes.push(
       `## How trials ended${suffix}`,
       '',
-      `![Outcome mix](figures/outcomes-${slug}.svg)`,
+      `![How trials ended](figures/outcomes-${slug}.svg)`,
       '',
       table(
-        ['cell', 'n', 'pass', ...FAILURE_TYPES],
+        ['tools', 'k', 'n', 'pass', ...FAILURE_TYPES.map((f) => f.replace('_', ' '))],
         g.cells.map((c) => [
-          `N=${fmtN(c.N)} · k=${c.k}`,
+          fmtN(c.N),
+          c.k,
           c.n,
           Math.round(c.success.p * c.n),
           ...FAILURE_TYPES.map((f) => c.failures[f]),
         ]),
       ),
       '',
-      `## Paired comparisons${suffix}`,
+    );
+
+    // curves only for groups that span several catalog sizes; the rest are in the method comparison
+    if (Ns.length < 2) continue;
+    files[`figures/success-${slug}.svg`] = lineChartSvg({
+      title: 'Success rate vs catalog size',
+      subtitle: 'one line per k, tools returned per search · whiskers = 95% CI',
+      xLabel: 'tools in the catalog',
+      xs: Ns.map(fmtN),
+      series: series((c) => c.success),
+    });
+    files[`figures/recall-${slug}.svg`] = lineChartSvg({
+      title: 'How often the right tool reached the agent',
+      subtitle: 'one line per k · whiskers = 95% CI',
+      xLabel: 'tools in the catalog',
+      xs: Ns.map(fmtN),
+      series: series((c) => c.retrieval_hit),
+    });
+    md.push(
+      `## Catalog size${curveSuffix}`,
       '',
-      pairedSection(g),
+      `![Success rate vs catalog size](figures/success-${slug}.svg)`,
+      '',
+      byNk((c) => c.success),
+      '',
+      `![Right tool delivered vs catalog size](figures/recall-${slug}.svg)`,
+      '',
+      byNk((c) => c.retrieval_hit),
+      '',
+    );
+    dt.push(
+      `## Catalog size${curveSuffix}`,
+      '',
+      'Success:',
+      '',
+      byNk((c) => c.success, true),
+      '',
+      'Right tool delivered to the agent:',
+      '',
+      byNk((c) => c.retrieval_hit, true),
+      '',
+      'Right tool picked, when it was delivered:',
+      '',
+      byNk((c) => c.selection_given_hit, true),
+      '',
+      'Same task in two settings:',
+      '',
+      pairedTable(g),
       '',
     );
   }
 
-  md.push(modeComparison(i.records, files), '');
+  if (modes.main) md.push(modes.main, '');
+  if (modes.details) dt.push(modes.details, '');
+  dt.push(...outcomes);
 
-  md.push(
+  dt.push(
     '## By task kind',
     '',
-    breakdownTable(kinds, 'kind'),
+    breakdownTable(breakdown(i.records, taskKind, ['single', 'chain', 'cross_app']), 'kind'),
     '',
-    '## By look-alikes in the catalog',
+    '## By look-alikes',
     '',
-    "Look-alikes = other tools in *that trial's* catalog with the same resource + action as a target",
-    '(e.g. every "delete job posting" tool). This grows with N, so it overlaps with the N effect.',
+    "Other tools in the trial's catalog with the same resource and action as the target, e.g. every",
+    '"delete job posting" tool. This grows with catalog size, so it overlaps with that effect.',
     '',
     breakdownTable(
       breakdown(
@@ -606,7 +564,7 @@ export function buildWriteup(i: WriteupInput): Record<string, string> {
       'look-alikes',
     ),
     '',
-    'Same, counting only the target\'s own vendor (other editions like "Slack Enterprise", other id forms):',
+    'Counting only the same vendor (other editions, other id forms):',
     '',
     breakdownTable(
       breakdown(
@@ -614,18 +572,13 @@ export function buildWriteup(i: WriteupInput): Record<string, string> {
         (r) => (r.confusers ? confuserBucket(r.confusers.same_vendor) : null),
         CONFUSER_BUCKETS,
       ),
-      'same-vendor',
+      'same vendor',
     ),
     '',
-  );
-
-  // per-task grid
-  md.push(
-    '## Every task × every setting',
+    '## Every task',
     '',
-    '✓ = pass; otherwise the failure: RM retrieval miss, WT wrong tool, BA bad args, HT hallucinated tool,',
-    'GU gave up, SL step limit, ERR error. A row that fails everywhere is worth checking for a task-wording',
-    'problem before blaming the model.',
+    '✓ pass · RM retrieval miss · WT wrong tool · BA bad args · HT hallucinated tool · GU gave up ·',
+    'SL step limit · ERR error',
     '',
   );
   for (const g of groups) {
@@ -633,10 +586,10 @@ export function buildWriteup(i: WriteupInput): Record<string, string> {
       uniqueSorted(g.rows.filter((r) => r.N === N).map((r) => r.k)).map((k) => ({ N, k })),
     );
     const taskIds = uniqueSorted(g.rows.map((r) => r.task_id));
-    if (g.label) md.push(`**${g.label}**`, '');
-    md.push(
+    if (g.label) dt.push(`**${g.label}**`, '');
+    dt.push(
       table(
-        ['task', 'kind', ...cols.map((c) => `${fmtN(c.N)} / k${c.k}`), 'pass'],
+        ['task', 'kind', ...cols.map((c) => `${fmtN(c.N)} k${c.k}`), 'pass'],
         taskIds.map((id) => {
           const rs = g.rows.filter((r) => r.task_id === id);
           const cell = (N: number, k: number) => {
@@ -658,90 +611,61 @@ export function buildWriteup(i: WriteupInput): Record<string, string> {
     );
   }
 
-  // failures
-  const failed = i.records.filter((r) => !r.metrics.success);
-  md.push(
-    '## Every failed trial',
-    '',
-    `Open \`report.html\` in this folder (links below) for the full step-by-step story of each trial.`,
+  dt.push(
+    '## Failures',
     '',
     table(
-      ['task', 'mode', 'N', 'k', 'outcome', 'what happened', 'story'],
-      failed.map((r) => [
-        r.task_id,
-        r.mode,
-        fmtN(r.N),
-        r.k,
-        r.failure_type ?? 'error',
-        whatHappened(r, i.names),
-        `[${r.trial_key}](report.html#t-${r.trial_key})`,
-      ]),
+      ['task', 'method', 'tools', 'k', 'outcome', 'what happened'],
+      i.records
+        .filter((r) => !r.metrics.success)
+        .map((r) => [
+          r.task_id,
+          MODE_SHORT[r.mode] ?? r.mode,
+          fmtN(r.N),
+          r.k,
+          r.failure_type?.replace('_', ' ') ?? 'error',
+          whatHappened(r, i.names),
+        ]),
     ),
     '',
-  );
-
-  // tasks
-  md.push(
-    '## Tasks used',
+    '## Tasks',
     '',
     table(
-      ['task', 'kind', 'prompt', 'expected call(s)'],
+      ['task', 'kind', 'prompt', 'expected tool'],
       tasksUsed.map((t) => [
         t.task_id,
         kindOf(t),
         t.prompt,
-        t.expected_calls
-          .map((x) => `${i.names.get(x.tool_id) ?? x.tool_id} ${JSON.stringify(x.args)}`)
-          .join(' → '),
+        t.expected_calls.map((x) => `\`${i.names.get(x.tool_id) ?? x.tool_id}\``).join(' → '),
       ]),
     ),
     '',
-  );
-
-  // definitions + reproduce
-  md.push(
-    '## Definitions',
+    '## Terms',
     '',
-    "- **N**: tools in the catalog the agent searches: the trial's own target tool(s) plus N − (targets) others",
-    '  from a fixed shuffled order, so a smaller catalog is always a subset of a bigger one.',
-    '- **k**: tools returned per search. The agent starts with no domain tools and calls `request_tools(need)`;',
-    '  in `direct` mode `need` is embedded and the top-k tools come back; in `rerank` mode the top 50 are',
-    '  re-ordered by a local cross-encoder first; in `query_agent` mode a second',
-    '  model searches (with filters) and hands back ≤ k tools.',
-    '- **recall@k**: every target tool was delivered to the agent by some search.',
-    '- **failure type**, first match wins: hallucinated_tool (called a tool that does not exist) → retrieval_miss',
-    '  (a target never delivered) → bad_args (target called, arguments wrong) → wrong_tool (called other',
-    '  tools instead) → step_limit (ran out of turns) → gave_up (stopped). For two-step tasks it describes',
-    '  the first step not done.',
-    '- **chain** task: create something, then act on it by the id the first call returned. **cross_app**:',
-    '  two independent jobs in apps of different categories.',
+    "- **tools / N**: catalog size. The trial's own target plus N − 1 others from a fixed shuffle, so a",
+    '  smaller catalog is a subset of a bigger one.',
+    '- **k**: tools handed to the agent per search.',
+    '- **delivered**: every target reached the agent through some search.',
+    '- **outcome**: the first thing that went wrong, in this order: hallucinated tool, retrieval miss,',
+    '  bad args, wrong tool, step limit, gave up. For two-step tasks, the first step not done.',
+    '- **chain**: create something, then act on it by the id that came back. **cross_app**: two',
+    '  unrelated jobs in different apps.',
     '',
-    '## Reproduce',
+    '## Setup',
     '',
-    `Environment of this write-up: ${Object.entries(m.env)
+    `${Object.entries(m.env)
       .map(([k, v]) => `${k} ${v}`)
-      .join(', ')}.`,
+      .join(' · ')}`,
     '',
-    '```sh',
-    'npm install',
-    'docker compose up -d qdrant',
-    `${m.gen_command}   # deterministic`,
-    `shasum -a 256 ${m.data.tools_file} ${m.data.tasks_file}`,
-    `#   expect ${m.data.tools_sha256}  ${m.data.tools_file}`,
-    `#          ${m.data.tasks_sha256}  ${m.data.tasks_file}`,
-    'npm run index        # embeds 200k tools into Qdrant, ≈7 min (cached after the first run)',
-    m.command,
-    `npm run results -- --run-id ${m.run_id}   # this folder`,
+    'Data checksums after `npm run gen`:',
+    '',
+    '```text',
+    `${m.data.tools_sha256}  ${m.data.tools_file}`,
+    `${m.data.tasks_sha256}  ${m.data.tasks_file}`,
     '```',
     '',
-    'The data is bit-identical on any machine; the model is not (it is sampled, and `claude -p` exposes no',
-    'temperature), so a rerun should land inside the intervals above rather than match trial by trial.',
-    'The sweep resumes where it left off if interrupted and pauses itself near the subscription window limit.',
-    '',
-    'Fixed knobs:',
-    '',
     table(
-      ['knob', 'value'],
+      ['setting', 'value'],
       Object.entries(m.knobs).map(([k, v]) => [k, typeof v === 'string' ? v : JSON.stringify(v)]),
     ),
     '',
@@ -751,17 +675,29 @@ export function buildWriteup(i: WriteupInput): Record<string, string> {
     i.workerPrompt,
     '```',
     '',
-    '## Files in this folder',
+  );
+
+  md.push(
+    '## Reproduce',
     '',
-    '- `trials.csv`: one row per trial (settings, outcome, metrics, tokens, latency).',
-    '- `cells.csv`: one row per setting, with rates and 95% intervals.',
-    '- `tasks.csv`: prompts and expected calls.',
-    '- `manifest.json`: everything above in machine-readable form (command, versions, checksums, knobs).',
-    '- `figures/`: the charts (SVG; light/dark aware).',
-    '- `report.html`: interactive report for this run only, with a step-by-step story per trial.',
+    '```sh',
+    'npm install && docker compose up -d qdrant',
+    m.gen_command,
+    'npm run index',
+    // a rerun gets its own id, so it doesn't append to this run's records
+    ...m.commands.map((c) =>
+      wrapCommand(c.replace(`--run-id ${m.run_id}`, `--run-id ${m.run_id}-rerun`)),
+    ),
+    `npm run results -- --run-id ${m.run_id}-rerun`,
+    '```',
+    '',
+    'The model is sampled, so a rerun lands near these numbers rather than on them. More tables are in',
+    '[details.md](details.md), every trial is in `trials.csv`, and `report.html` shows the searches and',
+    'calls of each one.',
     '',
   );
   files['README.md'] = md.join('\n');
+  files['details.md'] = dt.join('\n');
 
   // CSVs
   const csv = (head: string[], rows: unknown[][]) =>
